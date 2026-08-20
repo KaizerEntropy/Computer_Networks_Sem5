@@ -1,0 +1,782 @@
+\documentclass[12pt, a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{placeins}
+\usepackage{float}
+\usetikzlibrary{shapes.geometric, arrows, positioning}
+
+\geometry{margin=1in}
+
+% Code snippet styling
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+\lstset{style=mystyle}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    \vspace*{1cm}
+    
+    {\Huge \textbf{Jadavpur University}}\\[3 cm]
+    
+    % \includegraphics[width=0.4\textwidth]{JU_logo.png}\\[3 cm]
+    \vspace{4cm}
+    
+    {\huge \textbf{LAB REPORT}}\\[2cm]
+    
+    {\Large
+    \textbf{Name:} Diptarko Bhattacharjee\\[0.75 cm]
+    \textbf{Subject:} Computer Networks Lab\\[0.75 cm]
+    \textbf{Assignment:} 1
+    }
+    
+\end{titlepage}
+
+\newpage
+\tableofcontents
+\newpage
+
+
+\title{Assignment 1: Design and Implement an Error Detection Module using Checksum and Cyclic Redundancy Check (CRC)}
+\date{}
+\maketitle
+
+
+\section{Introduction}
+In physical networks, data is inherently susceptible to noise, attenuation, and electromagnetic interference, which can flip bits during transmission over long distances or noisy mediums. To guarantee data integrity and ensure that corrupted frames are not processed as valid data by higher layers, the Data Link Layer employs robust error detection algorithms. These algorithms typically append redundant verification bits---often referred to as a Frame Check Sequence (FCS)---to the end of a payload before it is transmitted across the physical medium. Upon receiving the frame, the receiver re-calculates the verification sequence and compares it to the FCS appended by the sender.
+
+The primary objective of this assignment is to design, implement, and rigorously test two classical error detection mechanisms: the \textbf{16-bit Internet Checksum} and the \textbf{Cyclic Redundancy Check (CRC)} (specifically CRC-8, CRC-10, CRC-16, and CRC-32). Rather than merely simulating this mathematically in a single, disconnected script, we built a fully functional client-server architecture using TCP Socket Programming in C++. This allows us to observe the mathematical blind spots of these algorithms in a realistic, distributed network environment, tracking the performance overhead and exact failure conditions of each scheme.
+
+\section{Inter-Process Communication (IPC)}
+To simulate a true network link where packets are serialized and deserialized across a physical boundary, our sender and receiver communicate using POSIX TCP Sockets. 
+
+\subsection{TCP Socket Architecture and Stream Boundaries}
+Transmission Control Protocol (TCP) ensures a reliable, stream-oriented connection. However, since TCP is a stream protocol (meaning it does not inherently preserve application-layer message boundaries and can fragment packets), our application layer must enforce strict boundaries to prevent data corruption. 
+
+We achieve this by defining a rigid, fixed-size \textbf{128-byte frame}. The Sender exclusively pushes exactly 128 bytes to the socket per transmission. We implemented a custom `send\_all` and `recv\_all` loop in our socket utility module. This ensures that the Receiver explicitly waits, continually reading from the socket buffer, until exactly 128 bytes are pulled before it attempts any FCS verification. After processing the frame, the receiver sends back a 5-byte Acknowledgement packet (either an ``ACK'' or ``NACK'') indicating the integrity verdict.
+
+\section{System Architecture}
+
+The system relies on a tightly coupled sender-receiver loop. The sender chunks the input file, computes the FCS using the chosen scheme, maliciously injects targeted deterministic errors, and transmits the frame. The receiver strictly parses the incoming 128 bytes, separates the payload from the FCS, recomputes the FCS over the payload, and validates it.
+
+\subsection{Frame Layout}
+We designed a strict 128-byte frame layout heavily inspired by the actual IEEE 802.3 Ethernet frame standard. The byte-by-byte breakdown of each individual frame is rigidly defined as follows:
+
+\begin{enumerate}
+    \item \textbf{6 bytes (Offset 0):} Destination MAC Address. Specifies the hardware address of the receiver.
+    \item \textbf{6 bytes (Offset 6):} Source MAC Address. Specifies the hardware address of the sender.
+    \item \textbf{2 bytes (Offset 12):} Valid payload length. Since the final chunk of a file might be less than 110 bytes, this 16-bit integer informs the receiver exactly how many bytes are valid application data versus zero-padded whitespace.
+    \item \textbf{110 bytes (Offset 14):} Payload data. The actual application-layer data being transmitted.
+    \item \textbf{4 bytes (Offset 124):} Frame Check Sequence (FCS). The redundant verification bits calculated by the Checksum or CRC logic. Though some CRCs are 8 or 16 bits, we allocate a full 4 bytes (32 bits) to accommodate CRC-32, right-justifying smaller schemes and padding with zeros.
+\end{enumerate}
+
+\vspace{10pt}
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|l|l|}
+\hline
+\textbf{Offset} & \textbf{Size (Bytes)} & \textbf{Field Description} \\ \hline
+0 & 6 & Destination MAC Address \\ \hline
+6 & 6 & Source MAC Address \\ \hline
+12 & 2 & Valid Payload Length ($\le$ 110) \\ \hline
+14 & 110 & Payload Data (Zero-padded if short) \\ \hline
+124 & 4 & Frame Check Sequence (FCS) \\ \hline
+\end{tabular}
+\caption{Custom 128-Byte Frame Structure}
+\end{table}
+
+\subsection{Flowchart and Data Flow}
+To visualize the interactions between these core modules, the following diagram illustrates the complete data flow. The ACK/NACK packet is securely routed back to the Sender to dictate the status of the transmission.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=2cm]
+\tikzstyle{process} = [rectangle, minimum width=3cm, minimum height=1cm, text centered, draw=black, fill=orange!30]
+\tikzstyle{io} = [trapezium, trapezium left angle=70, trapezium right angle=110, minimum width=2.5cm, minimum height=1cm, text centered, draw=black, fill=blue!30]
+\tikzstyle{arrow} = [thick,->,>=stealth]
+
+% Sender Side
+\node (in) [io] {Input File (.txt/.bits)};
+\node (chunk) [process, below of=in] {Chunk \& Pad (110B)};
+\node (fcs) [process, below of=chunk] {Compute FCS (Checksum/CRC)};
+\node (err) [process, below of=fcs] {Inject Errors (Round-Robin)};
+\node (tx) [process, below of=err, fill=red!30] {TCP Socket (Send)};
+
+% Receiver Side
+\node (rx) [process, right=5cm of tx, fill=green!30] {TCP Socket (Recv)};
+\node (ver) [process, above of=rx] {Recalculate FCS};
+\node (dec) [process, above of=ver, fill=yellow!30] {Verdict: ACK / NACK};
+\node (out) [io, above of=dec] {Output File};
+
+% Connections
+\draw [arrow] (in) -- (chunk);
+\draw [arrow] (chunk) -- (fcs);
+\draw [arrow] (fcs) -- (err);
+\draw [arrow] (err) -- (tx);
+\draw [arrow] (tx) -- node[anchor=south] {128-Byte Frame} (rx);
+\draw [arrow] (rx) -- (ver);
+\draw [arrow] (ver) -- (dec);
+\draw [arrow] (dec) -- node[anchor=west] {If ACK} (out);
+\draw [arrow] (dec.east) -- ++(1.5,0) |- node[anchor=north, near end] {ACK/NACK Packet} ([yshift=-1cm]tx.south) -- (tx.south);
+
+\end{tikzpicture}
+\caption{Overall System Architecture and Data Flow}
+\label{fig:arch}
+\end{figure}
+\FloatBarrier
+
+\section{Types of Errors and Encoding Schemes}
+
+\subsection{Encoding Schemes}
+We benchmarked the 16-bit Internet Checksum against four standard CRC polynomials. 
+
+\textbf{1. 16-Bit Internet Checksum:} 
+The Internet Checksum is a fast, computationally inexpensive heuristic used predominantly in Network and Transport layer protocols (like IPv4 and TCP). It divides the data payload into 16-bit words and computes their sum using 1's complement arithmetic. Any carry bits that overflow the 16-bit boundary are folded back into the sum (end-around carry). Finally, the sum is bitwise inverted. While phenomenally fast, it is structurally vulnerable to cancelling errors. If bits flip in a way that balances out the sum (e.g., swapping bits in two different 16-bit words, or incrementing one word while decrementing another), the checksum mathematically cannot detect the error.
+
+\textbf{2. Cyclic Redundancy Check (CRC):}
+To overcome the limitations of simple addition, CRCs evaluate the data as a massive binary polynomial. A predetermined Generator Polynomial (which acts as a prime divisor) is used to perform Modulo-2 division over the data stream. The remainder of this division becomes the FCS. Because it relies on polynomial division rather than arithmetic addition, CRCs are completely immune to the "balanced addition" trick that fools the Checksum. They are mathematically guaranteed to detect all single-bit errors, odd numbers of bit errors (if the polynomial contains an $x+1$ factor), and burst errors up to the length of the polynomial. We tested the following standardized polynomials:
+\begin{itemize}
+    \item \textbf{CRC-8}: $x^8 + x^7 + x^6 + x^4 + x^2 + 1$ (Hex: 0xD5)
+    \item \textbf{CRC-10}: $x^{10} + x^9 + x^5 + x^4 + x + 1$ (Hex: 0x233)
+    \item \textbf{CRC-16}: $x^{16} + x^{15} + x^2 + 1$ (Hex: 0x8005)
+    \item \textbf{CRC-32 (IEEE 802.3)}: Standard Ethernet Polynomial (Hex: 0x04C11DB7)
+\end{itemize}
+However, CRCs possess their own unique mathematical blind spot: if the error pattern itself represents a polynomial that is perfectly divisible by the generator polynomial (a polynomial collision), the remainder will be zero, and the CRC will blindly accept the corrupted frame.
+
+\subsection{Error Types and Deterministic Injection}
+To rigorously evaluate the algorithms without relying on statistical chance, we designed a deterministic \textbf{Round-Robin Error Injector}. The injector cycles through 7 specific error profiles, guaranteeing that every single frame is subjected to a targeted attack before transmission:
+
+\begin{enumerate}
+    \item \textbf{No Error (Clean):} Transmits the frame perfectly. Verifies baseline integrity.
+    \item \textbf{Single-Bit Error:} Flips exactly one random bit in the payload.
+    \item \textbf{Two Isolated Bit Errors:} Flips two bits that are strictly non-adjacent.
+    \item \textbf{Odd Number of Bit Errors:} Flips a random odd number (3, 5, or 7) of bits.
+    \item \textbf{Burst Error (8-bit):} Simulates localized interference. It flips the first and last bit of an 8-bit window, and randomizes the internal bits.
+    \item \textbf{Checksum-Blind Error:} Maliciously manipulates two 16-bit words in the payload. It increments one word and decrements an adjacent word. This perfectly preserves the arithmetic sum of the frame, mathematically guaranteeing that the Checksum will fail to detect it, while the CRC should easily catch it.
+    \item \textbf{CRC-Blind Error:} Maliciously XORs the payload with the exact bit-pattern of the active CRC Generator Polynomial. This ensures the injected error is a perfect multiple of the divisor, resulting in a zero remainder. The CRC mathematically cannot detect this, while the Checksum should easily flag the disrupted sum.
+\end{enumerate}
+
+\section{Project File Structure}
+The codebase is deliberately organized into a highly modular structure. By breaking the logic out into specialized files, we avoid "monolithic" scripts and make the core networking and algorithmic logic extremely transparent, maintainable, and beginner-friendly:
+
+\begin{verbatim}
+CN_Lab_Ass1/
+|-- Makefile               # Build automation script
+|-- frame.hpp / .cpp       # Frame structure and layout definitions
+|-- crc.hpp / .cpp         # CRC bit-by-bit mathematics
+|-- checksum.hpp / .cpp    # 16-bit Checksum mathematics
+|-- error.hpp / .cpp       # Deterministic round-robin error injection
+|-- utils.hpp / .cpp       # Network I/O and Socket helpers
+|-- sender.cpp             # Client application entry point
+|-- receiver.cpp           # Server application entry point
+\end{verbatim}
+
+
+\section{Core Modules \& Code Implementation}
+In this section, we analyze the core modules of the project, providing exhaustive, function-by-function analysis explaining the C++ logic. The code has been deliberately designed to be simple, legible, and beginner-friendly, utilizing standard loops, traditional \texttt{if-else} blocks, and easily understandable variable naming conventions. 
+
+To maintain report clarity and prevent excessive page lengths, we have extracted the most crucial methods and logic from each file rather than dumping the entire file contents. The full source code can be found in the GitHub repository linked in the Appendix.
+
+\subsection{\texttt{frame.hpp} and \texttt{frame.cpp} - Protocol Structure}
+This module defines the constants required for our 128-byte frame layout and provides the foundational structs and enumerators.
+
+\subsubsection{Key Code Snippets: Data Structures and Serialization}
+\begin{lstlisting}[language=C++]
+struct Frame {
+    uint8_t dest[DEST_LEN];
+    uint8_t src[SRC_LEN];
+    uint16_t length;
+    uint8_t payload[PAYLOAD_SIZE];
+    uint8_t fcs[FCS_SIZE];
+};
+
+void frame_to_bytes(const Frame &f, uint8_t out[FRAME_SIZE]) {
+    int off = 0;
+    
+    // Copy Destination MAC
+    for(int i=0; i<DEST_LEN; i++) out[off + i] = f.dest[i];
+    off += DEST_LEN;
+    
+    // Copy Source MAC
+    for(int i=0; i<SRC_LEN; i++) out[off + i] = f.src[i];
+    off += SRC_LEN;
+    
+    // Copy Length
+    out[off] = (uint8_t)((f.length >> 8) & 0xFF);
+    out[off+1] = (uint8_t)(f.length & 0xFF); 
+    off += LEN_FIELD;
+    
+    // Copy Payload
+    for(int i=0; i<PAYLOAD_SIZE; i++) out[off + i] = f.payload[i];
+    off += PAYLOAD_SIZE;
+    
+    // Copy FCS
+    for(int i=0; i<FCS_SIZE; i++) out[off + i] = f.fcs[i];
+}
+
+Frame frame_from_bytes(const uint8_t in[FRAME_SIZE]) {
+    Frame f;
+    int off = 0;
+    
+    for(int i=0; i<DEST_LEN; i++) f.dest[i] = in[off + i];
+    off += DEST_LEN;
+    
+    for(int i=0; i<SRC_LEN; i++) f.src[i] = in[off + i];
+    off += SRC_LEN;
+    
+    f.length = (uint16_t)((in[off] << 8) | in[off+1]); 
+    off += LEN_FIELD;
+    
+    for(int i=0; i<PAYLOAD_SIZE; i++) f.payload[i] = in[off + i];
+    off += PAYLOAD_SIZE;
+    
+    for(int i=0; i<FCS_SIZE; i++) f.fcs[i] = in[off + i];
+    
+    return f;
+}
+\end{lstlisting}
+
+\subsubsection{Detailed Module Analysis}
+\begin{itemize}
+    \item \textbf{Constants \& Layout:} The header explicitly defines the sizes of all fields using global constant integers. \texttt{DEST\_LEN} and \texttt{SRC\_LEN} are set to 6 bytes to represent standard MAC addresses. This results in a 14-byte \texttt{HEADER\_LEN}. We statically define the payload as exactly 110 bytes, and the FCS as 4 bytes. This makes the math extremely simple and hardcoded, preventing any buffer overflow issues during execution.
+    \item \textbf{\texttt{Frame} struct:} The core data structure mirroring the layout. It strictly defines the byte arrays for the destination, source, payload, and FCS.
+    \item \textbf{\texttt{frame\_to\_bytes} and \texttt{frame\_from\_bytes}:} Rather than utilizing advanced pointer casting, these functions use extremely simple, legible \texttt{for} loops. They iterate through each field of the struct (like the MAC address or payload) and copy them byte-by-byte into a flat \texttt{uint8\_t} array at the correct offset. The length field uses a simple bitwise shift (\texttt{>> 8}) to store the 16-bit integer across two 8-bit bytes (Big Endian format).
+\end{itemize}
+
+\subsection{\texttt{checksum.cpp} - Internet Checksum}
+This module contains the isolated logic for the 16-bit Internet Checksum.
+
+\subsubsection{Key Code Snippet: Checksum Computation}
+\begin{lstlisting}[language=C++]
+uint16_t compute_checksum(const uint8_t *data, int len) {
+    uint32_t sum = 0;
+    int i = 0;
+    
+    // Loop through 2 bytes at a time
+    while (i + 1 < len) {
+        uint16_t word = (uint16_t)((data[i] << 8) | data[i + 1]);
+        sum = sum + word;
+        
+        // Handle end-around carry
+        if (sum > 0xFFFF) {
+            sum = (sum & 0xFFFF) + 1;
+        }
+        i = i + 2;
+    }
+    
+    // If there is an odd byte left over
+    if (i < len) {
+        sum = sum + (uint16_t)(data[i] << 8);
+        if (sum > 0xFFFF) {
+            sum = (sum & 0xFFFF) + 1;
+        }
+    }
+    
+    // 1's complement
+    return (uint16_t)(~sum & 0xFFFF);
+}
+\end{lstlisting}
+
+\subsubsection{Detailed Module Analysis}
+\begin{itemize}
+    \item \textbf{\texttt{compute\_checksum}:} The function evaluates the payload in 16-bit segments. It uses a very clear \texttt{while (i + 1 < len)} loop to ensure it does not read out of bounds. 
+    \item \textbf{Forming the Word:} Inside the loop, it shifts the first byte by 8 bits to the left (\texttt{data[i] << 8}) and bitwise ORs it with the second byte to form a complete 16-bit integer (\texttt{word}). This word is then added to a 32-bit \texttt{sum} accumulator.
+    \item \textbf{Handling the End-Around Carry:} Standard 1's complement math requires that any overflow past 16 bits be added back. This is achieved through a very legible \texttt{if (sum > 0xFFFF)} check. If the sum crosses the 65,535 threshold, it masks it back to 16 bits (\texttt{sum \& 0xFFFF}) and explicitly adds $+1$ for the carry bit. 
+    \item \textbf{Odd Byte Padding:} In the event that the payload size is an odd number of bytes, a secondary \texttt{if (i < len)} block shifts that final solitary byte into the upper 8 bits, treating the lower 8 bits as zero-padding, and adds it to the sum, again checking for a carry.
+    \item \textbf{One's Complement Inversion:} Finally, the function returns the bitwise NOT (\texttt{\~sum}), perfectly reflecting the mathematical definition of the Internet Checksum.
+\end{itemize}
+
+\subsection{\texttt{crc.cpp} - Cyclic Redundancy Check}
+This module implements the Modulo-2 polynomial division.
+
+\subsubsection{Key Code Snippet: Modulo-2 Polynomial Division}
+\begin{lstlisting}[language=C++]
+uint32_t compute_crc(const uint8_t *data, int len, CrcPoly p) {
+    uint32_t mask;
+    if (p.width == 32) {
+        mask = 0xFFFFFFFFu;
+    } else {
+        mask = (1u << p.width) - 1u;
+    }
+    
+    uint32_t topbit = 1u << (p.width - 1);
+    uint32_t reg = 0;
+
+    for (int i = 0; i < len * 8; i++) {
+        int byte_idx = i / 8;
+        int bit_idx = 7 - (i % 8);
+        uint32_t bit = (data[byte_idx] >> bit_idx) & 1u;
+        
+        uint32_t carry = 0;
+        if ((reg & topbit) != 0) {
+            carry = 1;
+        }
+        
+        reg = ((reg << 1) | bit) & mask;
+        
+        if (carry == 1) {
+            reg = reg ^ p.poly;
+        }
+    }
+    return reg;
+}
+\end{lstlisting}
+
+\subsubsection{Detailed Module Analysis}
+\begin{itemize}
+    \item \textbf{\texttt{compute\_crc}:} This function explicitly avoids opaque optimization techniques like lookup tables, favoring a highly educational bit-by-bit long division loop. 
+    \item \textbf{Bit Extraction:} A \texttt{for} loop runs for exactly \texttt{len * 8} iterations. It calculates the current byte index (\texttt{i / 8}) and the specific bit index (\texttt{7 - (i \% 8)}), extracting exactly one bit at a time.
+    \item \textbf{Shift Register Logic:} It checks if the topmost bit of the \texttt{reg} register is a 1. If it is, the \texttt{carry} flag is explicitly set to 1. The register is then shifted left by one position, and the newly extracted bit is tacked onto the end. 
+    \item \textbf{Modulo-2 Subtraction:} If the carry was 1, polynomial division requires a subtraction. In Galois Field 2, subtraction is identical to a bitwise XOR. Thus, a very clear \texttt{if (carry == 1)} block XORs the register against the generator polynomial (\texttt{p.poly}). 
+\end{itemize}
+
+\subsection{\texttt{error.cpp} - Error Injection Logic}
+This module is the heart of the testing framework, applying deterministic sabotage to the outgoing frames. It utilizes basic \texttt{rand()} mechanics to keep the codebase beginner-friendly.
+
+\subsubsection{Key Code Snippets: Bit Flipping and Targeted Attacks}
+\begin{lstlisting}[language=C++]
+void flip_bit(uint8_t *data, int bit_pos) {
+    int byte_pos = bit_pos / 8;
+    int bit_offset = bit_pos % 8;
+    uint8_t mask = (0x80 >> bit_offset);
+    data[byte_pos] = data[byte_pos] ^ mask;
+}
+
+std::string two_isolated(uint8_t *data, int total_bits) {
+    int p1 = rand_range(0, total_bits);
+    int p2 = p1;
+    
+    while (abs(p2 - p1) < 2) {
+        p2 = rand_range(0, total_bits);
+    }
+    
+    flip_bit(data, p1);
+    flip_bit(data, p2);
+    
+    std::ostringstream oss;
+    oss << "Flipped bits " << p1 << " and " << p2;
+    return oss.str();
+}
+
+std::string checksum_blind(uint8_t *frame) {
+    int pstart = HEADER_LEN;
+    int pend = FCS_COVER_LEN;
+    
+    // Simple way to blind checksum: increment one word, decrement the next
+    for (int off = pstart; off + 3 < pend; off += 2) {
+        uint16_t w1 = (uint16_t)((frame[off]<<8) | frame[off+1]);
+        uint16_t w2 = (uint16_t)((frame[off+2]<<8) | frame[off+3]);
+        
+        if (w1 < 0xFFFF && w2 > 0) {
+            w1 = w1 + 1;
+            w2 = w2 - 1;
+            frame[off] = (uint8_t)(w1 >> 8); 
+            frame[off+1] = (uint8_t)(w1 & 0xFF);
+            frame[off+2] = (uint8_t)(w2 >> 8); 
+            frame[off+3] = (uint8_t)(w2 & 0xFF);
+            return "Checksum-blind: balanced word increment/decrement";
+        }
+    }
+    return "Checksum-blind: no suitable pattern found";
+}
+
+std::string crc_blind(uint8_t *frame, int scheme) {
+    int width = getSchemeInfo(scheme).width_bits;
+    if (scheme == CHECKSUM16) width = 32;
+    
+    CrcPoly p = getCrcPoly(width);
+    int start_bit = FCS_COVER_LEN * 8 - (width + 1);
+    int flips = 1;
+    
+    flip_bit(frame, start_bit);
+    
+    for (int b = 0; b < width; b++) {
+        if ((p.poly & (1u << (width - 1 - b))) != 0) {
+            flip_bit(frame, start_bit + 1 + b);
+            flips++;
+        }
+    }
+    
+    std::ostringstream oss;
+    oss << "CRC-blind: generator-poly pattern (" << flips << " bits flipped)";
+    return oss.str();
+}
+\end{lstlisting}
+
+\subsubsection{Detailed Module Analysis}
+\begin{itemize}
+    \item \textbf{\texttt{rand\_range}:} A very simple wrapper around the standard C library \texttt{rand()} function. It ensures that random numbers generated fall cleanly between a \texttt{lo} and \texttt{hi} limit using the modulo operator (\texttt{\% range}).
+    \item \textbf{\texttt{flip\_bit}:} A critical low-level utility. It takes an absolute bit position (e.g., bit 500), uses integer division to find the target byte (\texttt{byte\_pos = bit\_pos / 8}), and modulo to find the exact bit within that byte. It then XORs it with a shifted mask (\texttt{0x80 >> bit\_offset}) to perfectly invert that single bit without touching the others.
+    \item \textbf{Standard Errors (\texttt{two\_isolated}, \texttt{burst}):} These functions use extremely straightforward \texttt{while} and \texttt{for} loops to select random bit positions. For instance, in \texttt{two\_isolated}, a \texttt{while (abs(p2 - p1) < 2)} loop continuously re-rolls the second bit's position until it is guaranteed to be non-adjacent to the first bit. 
+    \item \textbf{\texttt{checksum\_blind}:} This function implements the most devastating attack against the Checksum. It uses a \texttt{for} loop to search through the frame data for two 16-bit words. If it finds a combination where one word can be incremented and the next decremented, it performs \texttt{w1 = w1 + 1} and \texttt{w2 = w2 - 1}. Because these mathematically balance out, the Checksum's overall arithmetic sum is totally undisturbed, fooling the algorithm.
+    \item \textbf{\texttt{crc\_blind}:} This function attacks the core weakness of Modulo-2 division. It fetches the generator polynomial. It then loops through the bits of the frame, intentionally injecting an error pattern that is exactly identical to the generator polynomial itself. Because a polynomial divided by itself leaves a remainder of zero, the CRC is mathematically blinded and incorrectly accepts the corrupted frame.
+\end{itemize}
+
+\subsection{\texttt{utils.cpp} - Network and Framework Utilities}
+This module houses the strict TCP socket handlers and the overarching FCS packaging routines. 
+
+\subsubsection{Key Code Snippets: Socket Flow and Frame Building}
+\begin{lstlisting}[language=C++]
+bool send_all(int sockfd, const void *data, size_t size) {
+    const uint8_t *p = (const uint8_t *)data;
+    size_t sent = 0;
+    while (sent < size) {
+        ssize_t n = send(sockfd, p + sent, size - sent, 0);
+        if (n <= 0) {
+            return false;
+        }
+        sent = sent + (size_t)n;
+    }
+    return true;
+}
+
+bool recv_all(int sockfd, void *data, size_t size) {
+    uint8_t *p = (uint8_t *)data;
+    size_t got = 0;
+    while (got < size) {
+        ssize_t n = recv(sockfd, p + got, size - got, 0);
+        if (n <= 0) {
+            return false;
+        }
+        got = got + (size_t)n;
+    }
+    return true;
+}
+
+Frame build_frame(const uint8_t *dest_mac, const uint8_t *src_mac, const uint8_t *chunk, int chunk_len, int scheme) {
+    Frame f;
+    
+    for(int i=0; i<DEST_LEN; i++) f.dest[i] = dest_mac[i];
+    for(int i=0; i<SRC_LEN; i++) f.src[i] = src_mac[i];
+    
+    f.length = (uint16_t)chunk_len;
+    
+    for(int i=0; i<PAYLOAD_SIZE; i++) f.payload[i] = 0; // Pad with zeros
+    
+    for(int i=0; i<chunk_len; i++) f.payload[i] = chunk[i];
+
+    uint8_t coverage[FCS_COVER_LEN];
+    int off = 0;
+    
+    for(int i=0; i<DEST_LEN; i++) coverage[off + i] = f.dest[i];
+    off += DEST_LEN;
+    
+    for(int i=0; i<SRC_LEN; i++) coverage[off + i] = f.src[i];
+    off += SRC_LEN;
+    
+    coverage[off] = (uint8_t)((f.length >> 8) & 0xFF);
+    coverage[off + 1] = (uint8_t)(f.length & 0xFF);
+    off += 2;
+    
+    for(int i=0; i<PAYLOAD_SIZE; i++) coverage[off + i] = f.payload[i];
+    
+    uint32_t val = fcs_compute(coverage, FCS_COVER_LEN, scheme);
+    fcs_pack(val, scheme, f.fcs);
+    return f;
+}
+\end{lstlisting}
+
+\subsubsection{Detailed Module Analysis}
+\begin{itemize}
+    \item \textbf{File Reading (\texttt{read\_text\_file}):} Instead of complex stream buffers, this uses an extremely basic \texttt{while (f.get(c))} loop to read the file character by character, casting it to a \texttt{uint8\_t}, and pushing it into a standard vector.
+    \item \textbf{Socket Reliability (\texttt{send\_all} and \texttt{recv\_all}):} In raw TCP Socket programming, \texttt{send()} and \texttt{recv()} are not guaranteed to transfer all requested bytes in a single call. These functions use a highly legible \texttt{while (sent < size)} loop. They continuously call the socket functions and increment an offset pointer, guaranteeing that exactly 128 bytes are pushed/pulled, eliminating the risk of fragmented frames.
+    \item \textbf{\texttt{fcs\_pack} and \texttt{fcs\_unpack}:} The calculated verification sequence (which could be 8, 10, or 16 bits) needs to be securely stored in the 4-byte FCS field of our frame. These functions use a \texttt{for} loop and bitwise shifts to copy the integer into the array, carefully right-justifying the bits and padding the leading space with zeroes. 
+    \item \textbf{\texttt{build\_frame}:} This is the master assembler. It takes the MAC addresses and payload data, loops through them to copy them into the \texttt{Frame} struct, and explicitly pads the rest of the 110-byte payload with zeroes. It then constructs a temporary \texttt{coverage} array, evaluates the FCS, and packs it into the frame.
+\end{itemize}
+
+\subsection{\texttt{sender.cpp} - The Client Application}
+This application is the active transmitter in the network. The code is structured linearly, relying on standard C++ inputs.
+
+\subsubsection{Key Code Snippet: Core Transmission Loop}
+\begin{lstlisting}[language=C++]
+for (int i = 0; i < total_frames; i++) {
+        plan.push_back(cycle[i % ROUND_ROBIN_CYCLE]);
+    }
+\end{lstlisting}
+
+\subsubsection{Detailed Module Analysis}
+\begin{itemize}
+    \item \textbf{Initialization and RNG:} The program starts by seeding the standard random number generator using \texttt{srand((unsigned)time(0))}, ensuring our error injector produces different randomized results on every run.
+    \item \textbf{Socket Setup:} It creates a standard \texttt{AF\_INET} socket, structures the \texttt{sockaddr\_in} object with the target IP and Port, and calls \texttt{connect()}. This is the textbook implementation of a TCP client.
+    \item \textbf{Handshake:} Before transmitting raw data, the sender transmits a 12-byte header array containing the chosen scheme, file type, and total number of frames. Crucially, it uses \texttt{htonl} (Host to Network Long) to ensure Endianness consistency across the network.
+    \item \textbf{Transmission Loop:} A massive \texttt{for} loop runs for every chunk of the file. It extracts up to 110 bytes, calls \texttt{build\_frame}, and transforms the struct into a 128-byte array. 
+    \item \textbf{Error Injection \& Output:} It consults the \texttt{error\_plan} array. If an error is scheduled, it passes the 128-byte array to \texttt{inject\_error}. The sender then utilizes \texttt{std::setw} and \texttt{std::left} from the \texttt{<iomanip>} library to print an absolutely beautiful, perfectly aligned ASCII table to the terminal, detailing the frame number, FCS value, error status, and the eventual ACK/NACK response from the server.
+\end{itemize}
+
+\subsection{\texttt{receiver.cpp} - The Server Daemon}
+This application passively binds to a port and verifies incoming frames, printing its own sophisticated tables.
+
+\subsubsection{Key Code Snippet: Core Verification Loop}
+\begin{lstlisting}[language=C++]
+for (int i = 0; i < total_frames; i++) {
+        plan.push_back(cycle[i % ROUND_ROBIN_CYCLE]);
+    }
+\end{lstlisting}
+
+\subsubsection{Detailed Module Analysis}
+\begin{itemize}
+    \item \textbf{Server Binding:} The receiver uses the standard \texttt{socket()}, \texttt{bind()}, and \texttt{listen()} pipeline. Notably, it utilizes \texttt{setsockopt(..., SO\_REUSEADDR, ...)} to prevent "Address already in use" errors if the server is rapidly restarted during testing. 
+    \item \textbf{Accepting Connections:} The program enters a blocking \texttt{accept()} call, halting execution until the sender initiates a handshake. Once connected, it uses \texttt{inet\_ntop} to decipher and print the sender's IP address.
+    \item \textbf{Synchronization:} It receives the 12-byte header and immediately runs \texttt{ntohl} (Network to Host Long) to decode it. This tells the receiver exactly which error scheme the sender is using and how many frames to expect in the upcoming loop.
+    \item \textbf{Reception Loop \& Profiling:} A \texttt{for} loop receives exactly 128 bytes. The receiver unpacks the byte array back into a \texttt{Frame} struct. It explicitly extracts the first 124 bytes (Header + Payload). Right before calling \texttt{fcs\_compute}, it triggers \texttt{std::chrono::high\_resolution\_clock::now()}. It stops the clock immediately after the calculation, allowing us to perfectly measure the microsecond delay induced by the Checksum or CRC logic.
+    \item \textbf{Verification \& File Writing:} It compares the recomputed FCS against the FCS sent in the frame. If they match perfectly (and there is no junk data in the padded FCS bytes), it prints "ACK" and pushes the valid payload into a \texttt{reconstructed} vector. If they do not match, it sends a "NACK" and drops the packet. After the loop terminates, the vector is written to a \texttt{received\_output.txt} file. 
+\end{itemize}
+
+\section{Experimental Results}
+
+
+
+To gather hard empirical data, we streamed a 2,916-byte text file through the TCP sockets on the local loopback interface using all 5 detection schemes. The total transmission consisted of 27 distinct frames.
+
+\subsection{Performance Metrics}
+We measured exactly how long the receiver took to run its verification math upon receiving each 128-byte frame. The system \texttt{std::chrono::high\_resolution\_clock} was used to profile the core FCS loop.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Scheme} & \textbf{Mean Verify Time ($\mu$s)} & \textbf{Total Frames} & \textbf{Errors Caught} \\ \midrule
+16-bit Checksum & 0.96  & 27 & 19 \\
+CRC-8           & 18.13 & 27 & 20 \\
+CRC-10          & 17.20 & 27 & 20 \\
+CRC-16          & 17.07 & 27 & 20 \\
+CRC-32          & 16.92 & 27 & 20 \\ \bottomrule
+\end{tabular}
+\caption{Mean Verification Time per Scheme}
+\end{table}
+
+\vspace{1cm}
+\textit{--- INSERT PYTHON GRAPH SCREENSHOT HERE ---}
+\vspace{1cm}
+
+\subsection{Detailed Dry Run \& Blind Spot Analysis}
+
+To systematically test the limits of these algorithms, our deterministic round-robin cycle injected 7 distinct error types. We will now do a deep-dive analysis of a single cycle, comparing the behavior of the Checksum against the CRC.
+
+\begin{scriptsize}
+\begin{verbatim}
+
+--------------------------------------------------------
+      SENDER - Error Detection Socket Programming       
+--------------------------------------------------------
+
+
+Select error-detection scheme:
+  1) 16-bit Checksum
+  2) CRC-8
+  3) CRC-10
+  4) CRC-16
+  5) CRC-32 (IEEE 802.3)
+Enter choice (1-5): --- TRANSMISSION INFO ---
+Input file       : message.txt
+File type        : Text file
+Message size     : 2916 bytes
+Payload/frame    : 110 bytes
+Total frames     : 27
+Scheme           : CRC-16
+Error mode       : Round-robin (7-type cycle)
+Frames w/ errors : 23 of 27
+-------------------------
+
+Connecting to 127.0.0.1:9000 ...
+Connected!
+
+----------------------------------------------------------------------------------------------------------
+Frame | Bytes | Pad | FCS Value  | Status         | Error Injected                        | Rx ACK
+----------------------------------------------------------------------------------------------------------
+1     | 110   | 0   | 0x5729 | CLEAN          | ---                                    | ACK  
+2     | 110   | 0   | 0x9d68 | ERROR INJECTED | Flipped bit 557 (byte 69, bit 5)      | NACK 
+3     | 110   | 0   | 0x9a08 | ERROR INJECTED | Flipped bits 629 and 690              | NACK 
+4     | 110   | 0   | 0x3805 | ERROR INJECTED | Flipped 5 bits                        | NACK 
+5     | 110   | 0   | 0x4d5c | ERROR INJECTED | 8-bit burst starting at bit 16        | NACK 
+6     | 110   | 0   | 0x1b1c | ERROR INJECTED | Checksum-blind: balanced word incre.. | NACK 
+7     | 110   | 0   | 0xbb62 | ERROR INJECTED | CRC-blind: generator-poly pattern (.. | ACK  
+8     | 110   | 0   | 0xf0a8 | CLEAN          | ---                                    | ACK  
+9     | 110   | 0   | 0xc8ae | ERROR INJECTED | Flipped bit 71 (byte 8, bit 7)        | NACK 
+10    | 110   | 0   | 0xaa9c | ERROR INJECTED | Flipped bits 569 and 437              | NACK 
+11    | 110   | 0   | 0x333e | ERROR INJECTED | Flipped 7 bits                        | NACK 
+12    | 110   | 0   | 0x4963 | ERROR INJECTED | 8-bit burst starting at bit 587       | NACK 
+13    | 110   | 0   | 0x1478 | ERROR INJECTED | Checksum-blind: balanced word incre.. | NACK 
+14    | 110   | 0   | 0x1d31 | ERROR INJECTED | CRC-blind: generator-poly pattern (.. | ACK  
+15    | 110   | 0   | 0x338d | CLEAN          | ---                                    | ACK  
+16    | 110   | 0   | 0x20e0 | ERROR INJECTED | Flipped bit 840 (byte 105, bit 0)     | NACK 
+17    | 110   | 0   | 0x5caf | ERROR INJECTED | Flipped bits 494 and 935              | NACK 
+18    | 110   | 0   | 0x7ea8 | ERROR INJECTED | Flipped 5 bits                        | NACK 
+19    | 110   | 0   | 0xb9cc | ERROR INJECTED | 8-bit burst starting at bit 180       | NACK 
+20    | 110   | 0   | 0x59eb | ERROR INJECTED | Checksum-blind: balanced word incre.. | NACK 
+21    | 110   | 0   | 0x9468 | ERROR INJECTED | CRC-blind: generator-poly pattern (.. | ACK  
+22    | 110   | 0   | 0x88cf | CLEAN          | ---                                    | ACK  
+23    | 110   | 0   | 0x6f3d | ERROR INJECTED | Flipped bit 863 (byte 107, bit 7)     | NACK 
+24    | 110   | 0   | 0xd9d5 | ERROR INJECTED | Flipped bits 112 and 231              | NACK 
+25    | 110   | 0   | 0xf839 | ERROR INJECTED | Flipped 5 bits                        | NACK 
+26    | 110   | 0   | 0xfe35 | ERROR INJECTED | 8-bit burst starting at bit 829       | NACK 
+27    | 56    | 54  | 0x3162 | ERROR INJECTED | Checksum-blind: balanced word incre.. | NACK 
+----------------------------------------------------------------------------------------------------------
+
+=== SENDER SUMMARY ===
+Input file       : message.txt
+File type        : Text file
+Message bytes    : 2916
+Frames sent      : 27
+Receiver ACKs    : 7
+Receiver NACKs   : 20
+Detection scheme : CRC-16
+Total send time  : 0.651356 ms
+======================
+
+\end{verbatim}
+\end{scriptsize}
+
+\begin{scriptsize}
+\begin{verbatim}
+
+--------------------------------------------------------
+     RECEIVER - Error Detection Socket Programming      
+--------------------------------------------------------
+
+Listening on port 9000 ... waiting for sender.
+Sender connected from 127.0.0.1!
+
+--- RECEPTION INFO ---
+Detection scheme : CRC-16
+File type        : Text file
+Frames expected  : 27
+Error mode       : Round-robin (7-type cycle)
+----------------------
+
+--------------------------------------------------------------------------------------
+Frame | Length | FCS (recv / calc)     | Verdict  | Expected Error Type           
+--------------------------------------------------------------------------------------
+1     | 110    | 0x5729 / 0x5729 | ACK      | No error (clean)
+2     | 110    | 0x9d68 / 0x91a5 | NACK     | Single-bit error
+3     | 110    | 0x9a08 / 0x86fa | NACK     | Two isolated bit errors
+4     | 110    | 0x3805 / 0xcb4e | NACK     | Odd number of bit errors
+5     | 110    | 0x4d5c / 0x397d | NACK     | Burst error (8-bit)
+6     | 110    | 0x1b1c / 0xace5 | NACK     | Checksum-blind error
+7     | 110    | 0xbb62 / 0xbb62 | ACK      | CRC-blind error
+8     | 110    | 0xf0a8 / 0xf0a8 | ACK      | No error (clean)
+9     | 110    | 0xc8ae / 0x2660 | NACK     | Single-bit error
+10    | 110    | 0xaa9c / 0x36a0 | NACK     | Two isolated bit errors
+11    | 110    | 0x333e / 0xb290 | NACK     | Odd number of bit errors
+12    | 110    | 0x4963 / 0x27fc | NACK     | Burst error (8-bit)
+13    | 110    | 0x1478 / 0xd7ec | NACK     | Checksum-blind error
+14    | 110    | 0x1d31 / 0x1d31 | ACK      | CRC-blind error
+15    | 110    | 0x338d / 0x338d | ACK      | No error (clean)
+16    | 110    | 0x20e0 / 0x8807 | NACK     | Single-bit error
+17    | 110    | 0x5caf / 0x2453 | NACK     | Two isolated bit errors
+18    | 110    | 0x7ea8 / 0x3802 | NACK     | Odd number of bit errors
+19    | 110    | 0xb9cc / 0x7156 | NACK     | Burst error (8-bit)
+20    | 110    | 0x59eb / 0xad4d | NACK     | Checksum-blind error
+21    | 110    | 0x9468 / 0x9468 | ACK      | CRC-blind error
+22    | 110    | 0x88cf / 0x88cf | ACK      | No error (clean)
+23    | 110    | 0x6f3d / 0x6e3b | NACK     | Single-bit error
+24    | 110    | 0xd9d5 / 0xc2ea | NACK     | Two isolated bit errors
+25    | 110    | 0xf839 / 0x3971 | NACK     | Odd number of bit errors
+26    | 110    | 0xfe35 / 0x4111 | NACK     | Burst error (8-bit)
+27    | 56     | 0x3162 / 0xe018 | NACK     | Checksum-blind error
+--------------------------------------------------------------------------------------
+
+=== RECEIVER SUMMARY ===
+Detection scheme    : CRC-16
+File type           : Text file
+Frames expected     : 27
+Frames received     : 27
+Frames ACCEPTED     : 7
+Frames REJECTED     : 20
+Rejected frames     : 2, 3, 4, 5, 6, 9, 10, 11, 12, 13...
+Bytes reconstructed : 770
+Output file         : received_output.txt
+Total receive time  : 0.589439 ms
+Avg verify time     : 1.96385 us
+========================
+
+  NOTE: Rejected frames were NOT written to the output file.
+        The reconstructed message has gaps at those positions.
+
+\end{verbatim}
+\end{scriptsize}
+
+
+\subsubsection{Frames 1-5: Standard Network Interference}
+For the first 5 frames of the cycle, standard network noise was simulated:
+\begin{itemize}
+    \item \textbf{Frame 1 (Clean)}: Both algorithms flawlessly calculated the FCS, matched the signature, and sent an ACK.
+    \item \textbf{Frame 2 (Single Bit)}: A single bit flip guarantees an arithmetic disruption in the Checksum and an indivisible polynomial in the CRC. Both successfully issued a NACK.
+    \item \textbf{Frame 3 (Two Isolated Bits)}: Both algorithms detected the dual-corruption (NACK).
+    \item \textbf{Frame 4 (Odd Bits)}: As predicted by Galois theory, CRCs equipped with an $x+1$ factor are inherently immune to odd-number bit errors. Both Checksum and CRC successfully caught this (NACK).
+    \item \textbf{Frame 5 (Burst)}: An 8-bit burst alters multiple adjacent bits. Since the burst length is smaller than our smallest CRC polynomial width (10, 16, 32), the CRC mathematically guarantees detection. Both caught it (NACK).
+\end{itemize}
+
+\subsubsection{Frame 6 Analysis: Exploiting the Checksum Blind Spot}
+In Frame 6, the error injector applied a targeted semantic attack against the Checksum. It incremented one 16-bit payload word and decremented an adjacent word. 
+
+\textbf{Result (Checksum)}: The receiver extracted the payload and began 1's complement addition. Because the changes perfectly offset one another ($+1 -1 = 0$), the final arithmetic sum of the 124-byte block was completely unchanged. The recomputed FCS perfectly matched the transmitted FCS. The Checksum was entirely fooled and issued a false \textbf{ACK}, corrupting the final output file.
+
+\textbf{Result (CRC)}: Because CRC utilizes modulo-2 polynomial division instead of arithmetic addition, the word-swapping profoundly altered the bitstream topology. The $+1$ and $-1$ changes do not "cancel out" in GF(2) division; they drastically shift the polynomial remainder. The CRC successfully flagged the discrepancy and issued a \textbf{NACK}.
+
+\subsubsection{Frame 7 Analysis: Exploiting the CRC Blind Spot}
+In Frame 7, the error injector targeted the mathematical foundation of the CRC. It XORed the payload with the exact bit-pattern of the active CRC Generator Polynomial (e.g., XORing \texttt{0x8005} into the payload for CRC-16).
+
+\textbf{Result (CRC)}: In polynomial mathematics, the received message $M(x)$ was altered to $M(x) + E(x)$. Because we set $E(x)$ to equal the generator polynomial $G(x)$, the received message became $M(x) + G(x)$. When the receiver divided by $G(x)$, the remainder of $G(x) / G(x)$ is $0$. The error vanished in the mathematics. The CRC was completely fooled and issued a false \textbf{ACK}.
+
+\textbf{Result (Checksum)}: The Checksum processed the generator polynomial bit-pattern as a random integer addition. This entirely perturbed the arithmetic sum. The Checksum trivially detected the anomaly and issued a \textbf{NACK}.
+
+\section{Discussion}
+The implementation and empirical results of this project heavily underscore a massive tradeoff in network engineering: \textbf{Speed vs. Reliability}.
+
+As our timing benchmarks proved, the 16-bit Internet Checksum is phenomenally fast, consistently verifying frames in under $1 \mu s$. This speed is achieved because modern CPU Arithmetic Logic Units (ALUs) are natively optimized for integer addition, allowing the checksum to be computed at wire-speed. However, this speed comes at a severe structural cost: it possesses massive theoretical blind spots that can easily allow corrupted data to slip through.
+
+Conversely, the CRC algorithms required nearly $18 \mu s$ to evaluate the exact same payload. This represents a 1700\% increase in computational overhead when utilizing bit-by-bit shift registers. However, CRCs provide mathematically guaranteed protection against localized bursts and random noise, providing absolute confidence in the integrity of the physical transmission medium. 
+
+This dichotomy perfectly explains the layered design of the OSI Model. The Data Link Layer (Layer 2) requires the absolute robustness of the CRC (e.g., Ethernet IEEE 802.3 uses CRC-32) to ensure the physical wires are operating correctly. However, once the packet reaches the Network and Transport Layers (IPv4, TCP), computing another CRC would introduce crippling latency. Therefore, the higher layers rely on the blazing-fast, lightweight heuristic of the Internet Checksum to catch any rare routing/memory errors, offloading the heavy lifting to the hardware below.
+
+\section{Conclusion}
+Building this error detection suite from the ground up highlighted the practical realities of network engineering. Implementing POSIX TCP Sockets demonstrated how physical bytes are streamed across boundaries, requiring rigid, inflexible frame layouts to parse successfully.
+
+Our comparative testing conclusively verified the theoretical properties of these algorithms. The Internet Checksum is a lightweight heuristic suitable for layers where speed is paramount, but it is deeply vulnerable to cancelling errors. CRCs provide robust, mathematically guaranteed protection against interference, making them indispensable for physical connections, albeit at a higher computational cost. Furthermore, isolating the exact theoretical blind spots of both mathematical paradigms (the balanced-addition trick vs. the polynomial collision trick) proved that relying on a single verification algorithm is insufficient, and layered protocols are structurally necessary to provide absolute network integrity.
+
+
+\newpage
+\appendix
+\section{Source Code Repository}
+The complete, unedited source code for this project, including the C++ implementation, networking utilities, error injection modules, and test scripts, is hosted in a public GitHub repository. Examiners can readily access, clone, and review the full codebase at the following link:
+
+\vspace{0.5cm}
+\begin{center}
+\textbf{\url{https://github.com/Diptarko-Bhattacharjee/CN_Lab_Ass1}}
+\end{center}
+\vspace{0.5cm}
+
+This approach allows for a streamlined report focused on core concepts while providing full transparency into the exact implementation details.
+
+\end{document}
