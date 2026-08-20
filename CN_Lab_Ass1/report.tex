@@ -575,9 +575,12 @@ CRC-32          & 16.92 & 27 & 20 \\ \bottomrule
 \caption{Mean Verification Time per Scheme}
 \end{table}
 
-\vspace{1cm}
-\textit{--- INSERT PYTHON GRAPH SCREENSHOT HERE ---}
-\vspace{1cm}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{performance_graph.png}
+    \caption{Average Verification Time per Frame for Checksum and CRC Schemes}
+    \label{fig:performance}
+\end{figure}
 
 \subsection{Detailed Dry Run \& Blind Spot Analysis}
 
@@ -761,22 +764,9 @@ Conversely, the CRC algorithms required nearly $18 \mu s$ to evaluate the exact 
 This dichotomy perfectly explains the layered design of the OSI Model. The Data Link Layer (Layer 2) requires the absolute robustness of the CRC (e.g., Ethernet IEEE 802.3 uses CRC-32) to ensure the physical wires are operating correctly. However, once the packet reaches the Network and Transport Layers (IPv4, TCP), computing another CRC would introduce crippling latency. Therefore, the higher layers rely on the blazing-fast, lightweight heuristic of the Internet Checksum to catch any rare routing/memory errors, offloading the heavy lifting to the hardware below.
 
 \section{Conclusion}
-Building this error detection suite from the ground up highlighted the practical realities of network engineering. Implementing POSIX TCP Sockets demonstrated how physical bytes are streamed across boundaries, requiring rigid, inflexible frame layouts to parse successfully.
+Building this error detection suite from the ground up highlighted the practical realities of network engineering. Implementing POSIX TCP Sockets demonstrated how physical bytes are streamed across boundaries, requiring rigid, inflexible frame layouts to parse successfully. The complete, unedited source code for this project is hosted in a public GitHub repository and can be readily accessed at \url{https://github.com/KaizerEntropy/Computer_Networks_Sem5}.
 
 Our comparative testing conclusively verified the theoretical properties of these algorithms. The Internet Checksum is a lightweight heuristic suitable for layers where speed is paramount, but it is deeply vulnerable to cancelling errors. CRCs provide robust, mathematically guaranteed protection against interference, making them indispensable for physical connections, albeit at a higher computational cost. Furthermore, isolating the exact theoretical blind spots of both mathematical paradigms (the balanced-addition trick vs. the polynomial collision trick) proved that relying on a single verification algorithm is insufficient, and layered protocols are structurally necessary to provide absolute network integrity.
 
-
-\newpage
-\appendix
-\section{Source Code Repository}
-The complete, unedited source code for this project, including the C++ implementation, networking utilities, error injection modules, and test scripts, is hosted in a public GitHub repository. Examiners can readily access, clone, and review the full codebase at the following link:
-
-\vspace{0.5cm}
-\begin{center}
-\textbf{\url{https://github.com/Diptarko-Bhattacharjee/CN_Lab_Ass1}}
-\end{center}
-\vspace{0.5cm}
-
-This approach allows for a streamlined report focused on core concepts while providing full transparency into the exact implementation details.
 
 \end{document}
