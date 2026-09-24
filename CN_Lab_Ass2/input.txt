@@ -1,9 +1,0 @@
-Computer Networks Lab
-Assignment 2: Flow Control Mechanisms
-
-This assignment covers:
-1. Stop and Wait ARQ
-2. Go-Back-N ARQ
-3. Selective Repeat ARQ
-
-This file is used to test the implementations. It contains enough bytes to be split into multiple frames and sent across the network via UDP sockets.
