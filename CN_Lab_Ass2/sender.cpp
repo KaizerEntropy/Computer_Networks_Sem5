@@ -50,11 +50,13 @@ int main(int argc, char* argv[]) {
     cout << "Select Error Checking Scheme:\n1. Checksum\n2. CRC-32\nChoice: ";
     cin >> scheme;
 
-    double prob_loss = 0.0, prob_error = 0.0, prob_ack_loss = 0.0;
+    double prob_loss = 0.0, prob_error = 0.0, prob_ack_loss = 0.0, prob_delay = 0.0;
     cout << "Enter Probability of Packet Loss (0.0 - 1.0): ";
     cin >> prob_loss;
     cout << "Enter Probability of Bit Error (0.0 - 1.0): ";
     cin >> prob_error;
+    cout << "Enter Probability of Transmission Delay > Timeout (0.0 - 1.0): ";
+    cin >> prob_delay;
     cout << "Enter Probability of Receiver ACK Loss (0.0 - 1.0): ";
     cin >> prob_ack_loss;
 
@@ -139,13 +141,14 @@ int main(int argc, char* argv[]) {
     stats.prob_loss = prob_loss;
     stats.prob_error = prob_error;
     stats.protocol = protocol;
+    stats.prob_delay = prob_delay;
 
     if (protocol == 1) {
-        run_sw_sender(sock, dest_addr, frames, 500, prob_loss, prob_error, scheme, stats);
+        run_sw_sender(sock, dest_addr, frames, 500, prob_loss, prob_error, prob_delay, scheme, stats);
     } else if (protocol == 2) {
-        run_gbn_sender(sock, dest_addr, frames, window_size, 500, prob_loss, prob_error, scheme, stats);
+        run_gbn_sender(sock, dest_addr, frames, window_size, 500, prob_loss, prob_error, prob_delay, scheme, stats);
     } else if (protocol == 3) {
-        run_sr_sender(sock, dest_addr, frames, window_size, 500, prob_loss, prob_error, scheme, stats);
+        run_sr_sender(sock, dest_addr, frames, window_size, 500, prob_loss, prob_error, prob_delay, scheme, stats);
     }
 
     auto end = chrono::steady_clock::now();

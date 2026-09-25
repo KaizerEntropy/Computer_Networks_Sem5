@@ -15,6 +15,7 @@ void print_visualization(const SimulationStats& stats) {
     cout << " Protocol           : " << proto << "\n";
     cout << " Loss Probability   : " << stats.prob_loss << "\n";
     cout << " Error Probability  : " << stats.prob_error << "\n";
+    cout << " Delay Probability  : " << stats.prob_delay << "\n";
     cout << "------------------------------------------------------------\n";
     cout << " Total Data Frames  : " << stats.total_frames << "\n";
     cout << " Total Transmitted  : " << stats.total_transmissions << " (Includes retransmissions)\n";
@@ -64,10 +65,13 @@ void print_visualization(const SimulationStats& stats) {
     cout << "============================================================\n\n";
     cout << "CONCLUSION based on Assignment 2 conditions:\n";
     cout << "- Time between propagation and ACK is represented in Average RTT.\n";
-    if (stats.prob_loss == 0 && stats.prob_error == 0) {
-        cout << "- Since error/loss is 0, efficiency represents raw protocol capability without network interference.\n";
+    if (stats.prob_loss == 0 && stats.prob_error == 0 && stats.prob_delay == 0) {
+        cout << "- Since error/loss/delay is 0, efficiency represents raw protocol capability without network interference.\n";
     } else {
-        cout << "- Efficiency drops proportionally to the specified error (" << stats.prob_error << ") and loss (" << stats.prob_loss << ") rates.\n";
+        cout << "- Efficiency drops proportionally to the specified error (" << stats.prob_error << "), loss (" << stats.prob_loss << "), and delay (" << stats.prob_delay << ") rates.\n";
+        if (stats.prob_delay > 0) {
+            cout << "- The 20ms Latency vastly overpowered the 10ms socket timeout, causing premature timeouts!\n";
+        }
         if (stats.protocol == 2 && stats.total_timeouts > 0) {
             cout << "- Notice how Go-Back-N's efficiency drops drastically due to window retransmissions compared to Selective Repeat.\n";
         }

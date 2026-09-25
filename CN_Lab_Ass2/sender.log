@@ -1,0 +1,64 @@
+Enter Receiver IP: Enter Port: Enter Input File: Select Protocol:
+1. Stop and Wait
+2. Go-Back-N
+3. Selective Repeat
+Choice: Enter Window Size (N): Select Error Checking Scheme:
+1. Checksum
+2. CRC-32
+Choice: Enter Probability of Packet Loss (0.0 - 1.0): Enter Probability of Bit Error (0.0 - 1.0): Enter Probability of Receiver ACK Loss (0.0 - 1.0): 
+Total Frames to send: 7
+
+
+[Sender] Handshaking with Receiver to sync configurations...
+[Sender] Configuration synced successfully!
+
+[SR Sender] Sending Frame 0 (Seq: 0)
+[SR Sender] Sending Frame 1 (Seq: 1)
+[SR Sender] Sending Frame 2 (Seq: 2)
+[SR Sender] Sending Frame 3 (Seq: 3)
+[SR Sender] Received Independent ACK for Frame 0 (RTT: 60 ms)
+[SR Sender] Received Independent ACK for Frame 1 (RTT: 40 ms)
+[SR Sender] Received Independent ACK for Frame 2 (RTT: 20 ms)
+[SR Sender] Sending Frame 4 (Seq: 4)
+[SR Sender] Sending Frame 5 (Seq: 5)
+[SR Sender] Sending Frame 6 (Seq: 6)
+[SR Sender] Received Independent ACK for Frame 3 (RTT: 66 ms)
+[SR Sender] Received Independent ACK for Frame 4 (RTT: 40 ms)
+[SR Sender] Received Independent ACK for Frame 5 (RTT: 20 ms)
+[SR Sender] Received Independent ACK for Frame 6 (RTT: 20 ms)
+
+=== SR Transmission Complete ===
+Total Transmissions: 7
+Total Timeouts: 0
+
+============================================================
+             DATA LINK LAYER PROTOCOL ANALYSIS              
+============================================================
+ Protocol           : Selective Repeat ARQ
+ Loss Probability   : 0.1
+ Error Probability  : 0.2
+------------------------------------------------------------
+ Total Data Frames  : 7
+ Total Transmitted  : 7 (Includes retransmissions)
+ Total Timeouts     : 0
+ Total Time Elapsed : 178 ms
+------------------------------------------------------------
+ RTT (Propagation + ACK Reception) Analysis:
+ - Min RTT          : 20 ms
+ - Max RTT          : 66 ms
+ - Avg RTT          : 38 ms
+------------------------------------------------------------
+ Throughput Efficiency (Unique/Total Transmissions) : 100.00 %
+============================================================
+ Efficiency Visualization:
+ [##################################################] 100.00%
+ Packet Distribution:
+ Unique Frames : [==================================================] 100%
+ Retransmitted : [                                                  ] 0%
+============================================================
+
+CONCLUSION based on Assignment 2 conditions:
+- Time between propagation and ACK is represented in Average RTT.
+- Efficiency drops proportionally to the specified error (0.20) and loss (0.10) rates.
+============================================================
+

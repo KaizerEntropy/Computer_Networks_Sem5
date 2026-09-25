@@ -53,7 +53,7 @@ void gbn_recv_thread(int sock, int scheme, GBNState* state, int total_frames) {
     }
 }
 
-void run_gbn_sender(int sock, struct sockaddr_in& dest_addr, const vector<Frame>& frames, int window_size, int timeout_ms, double prob_loss, double prob_error, int scheme, SimulationStats& stats) {
+void run_gbn_sender(int sock, struct sockaddr_in& dest_addr, const vector<Frame>& frames, int window_size, int timeout_ms, double prob_loss, double prob_error, double prob_delay, int scheme, SimulationStats& stats) {
     GBNState state;
     state.stats = &stats;
     int next_seq = 0;
@@ -77,7 +77,7 @@ void run_gbn_sender(int sock, struct sockaddr_in& dest_addr, const vector<Frame>
             f.calculate_fcs(scheme);
             
             cout << "[GBN Sender] Sending Frame " << next_seq << " (Seq: " << (int)f.seq_no << ")\n";
-            if (channel_transmit(f, prob_loss, prob_error)) {
+            if (channel_transmit(f, prob_loss, prob_error, prob_delay)) {
                 vector<uint8_t> buffer = f.serialize();
                 sendto(sock, buffer.data(), buffer.size(), 0, (struct sockaddr*)&dest_addr, dest_len);
             }
@@ -103,7 +103,7 @@ void run_gbn_sender(int sock, struct sockaddr_in& dest_addr, const vector<Frame>
                 Frame f = frames[i];
                 f.calculate_fcs(scheme);
                 cout << "[GBN Sender] Retransmitting Frame " << i << " (Seq: " << (int)f.seq_no << ")\n";
-                if (channel_transmit(f, prob_loss, prob_error)) {
+                if (channel_transmit(f, prob_loss, prob_error, prob_delay)) {
                     vector<uint8_t> buffer = f.serialize();
                     sendto(sock, buffer.data(), buffer.size(), 0, (struct sockaddr*)&dest_addr, dest_len);
                 }
@@ -171,7 +171,7 @@ void run_gbn_receiver(int sock, double prob_ack_loss, int scheme, std::vector<ui
             ack.seq_no = 0;
             ack.calculate_fcs(scheme);
             
-            if (channel_transmit(ack, prob_ack_loss, 0.0)) {
+            if (channel_transmit(ack, prob_ack_loss, 0.0, 0.0)) {
                 vector<uint8_t> buffer = ack.serialize();
                 sendto(sock, buffer.data(), buffer.size(), 0, (struct sockaddr*)&client_addr, client_len);
             }

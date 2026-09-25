@@ -19,7 +19,7 @@ struct SRState {
     map<int, chrono::time_point<chrono::steady_clock>> send_times;
 };
 
-void sr_recv_thread(int sock, int scheme, SRState* state, int total_frames, struct sockaddr_in& dest_addr, const vector<Frame>& frames, double prob_loss, double prob_error) {
+void sr_recv_thread(int sock, int scheme, SRState* state, int total_frames, struct sockaddr_in& dest_addr, const vector<Frame>& frames, double prob_loss, double prob_error, double prob_delay) {
     socklen_t dest_len = sizeof(dest_addr);
     
     while (true) {
@@ -43,7 +43,7 @@ void sr_recv_thread(int sock, int scheme, SRState* state, int total_frames, stru
                      cout << "[SR Sender] Received NAK for Frame " << nak_seq << ". Retransmitting immediately.\n";
                      Frame ret_f = frames[nak_seq];
                      ret_f.calculate_fcs(scheme);
-                     if (channel_transmit(ret_f, prob_loss, prob_error)) {
+                     if (channel_transmit(ret_f, prob_loss, prob_error, prob_delay)) {
                          vector<uint8_t> buffer = ret_f.serialize();
                          sendto(sock, buffer.data(), buffer.size(), 0, (struct sockaddr*)&dest_addr, dest_len);
                      }
@@ -77,7 +77,7 @@ void sr_recv_thread(int sock, int scheme, SRState* state, int total_frames, stru
     }
 }
 
-void run_sr_sender(int sock, struct sockaddr_in& dest_addr, const vector<Frame>& frames, int window_size, int timeout_ms, double prob_loss, double prob_error, int scheme, SimulationStats& stats) {
+void run_sr_sender(int sock, struct sockaddr_in& dest_addr, const vector<Frame>& frames, int window_size, int timeout_ms, double prob_loss, double prob_error, double prob_delay, int scheme, SimulationStats& stats) {
     SRState state;
     state.stats = &stats;
     int next_seq = 0;
@@ -86,7 +86,7 @@ void run_sr_sender(int sock, struct sockaddr_in& dest_addr, const vector<Frame>&
     socklen_t dest_len = sizeof(dest_addr);
     map<int, chrono::time_point<chrono::steady_clock>> timers;
 
-    thread recv_th(sr_recv_thread, sock, scheme, &state, frames.size(), std::ref(dest_addr), std::ref(frames), prob_loss, prob_error);
+    thread recv_th(sr_recv_thread, sock, scheme, &state, frames.size(), std::ref(dest_addr), std::ref(frames), prob_loss, prob_error, prob_delay);
 
     while (true) {
         state.mtx.lock();
@@ -101,7 +101,7 @@ void run_sr_sender(int sock, struct sockaddr_in& dest_addr, const vector<Frame>&
             f.calculate_fcs(scheme);
             
             cout << "[SR Sender] Sending Frame " << next_seq << " (Seq: " << (int)f.seq_no << ")\n";
-            if (channel_transmit(f, prob_loss, prob_error)) {
+            if (channel_transmit(f, prob_loss, prob_error, prob_delay)) {
                 vector<uint8_t> buffer = f.serialize();
                 sendto(sock, buffer.data(), buffer.size(), 0, (struct sockaddr*)&dest_addr, dest_len);
             }
@@ -125,7 +125,7 @@ void run_sr_sender(int sock, struct sockaddr_in& dest_addr, const vector<Frame>&
                     
                     Frame f = frames[i];
                     f.calculate_fcs(scheme);
-                    if (channel_transmit(f, prob_loss, prob_error)) {
+                    if (channel_transmit(f, prob_loss, prob_error, prob_delay)) {
                         vector<uint8_t> buffer = f.serialize();
                         sendto(sock, buffer.data(), buffer.size(), 0, (struct sockaddr*)&dest_addr, dest_len);
                     }
@@ -170,7 +170,7 @@ void run_sr_receiver(int sock, int window_size, double prob_ack_loss, int scheme
         ack.seq_no = 0;
         ack.calculate_fcs(scheme);
         
-        if (channel_transmit(ack, prob_ack_loss, 0.0)) {
+        if (channel_transmit(ack, prob_ack_loss, 0.0, 0.0)) {
             vector<uint8_t> buffer = ack.serialize();
             sendto(sock, buffer.data(), buffer.size(), 0, (struct sockaddr*)&client_addr, client_len);
         }

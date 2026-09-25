@@ -1,0 +1,18 @@
+
+Receiver listening on port 8080... waiting for sender config.
+[Receiver] Configuration synced from Sender:
+  - Protocol: 3
+  - Window Size: 4
+  - Error Scheme: 1
+  - ACK Loss Prob: 0
+
+[SR Receiver] Received Frame 0. Buffering and sending Independent ACK.
+[SR Receiver] Received Frame 1. Buffering and sending Independent ACK.
+[SR Receiver] Received Frame 2. Buffering and sending Independent ACK.
+[SR Receiver] Received Frame 3. Buffering and sending Independent ACK.
+[SR Receiver] Received Frame 4. Buffering and sending Independent ACK.
+[SR Receiver] Received Frame 5. Buffering and sending Independent ACK.
+[SR Receiver] Received Frame 6. Buffering and sending Independent ACK.
+
+[SR Receiver] EOF Frame received. Transmission complete.
+Received data saved to 'received_file.txt' (298 bytes).
