@@ -1,109 +1,52 @@
-#include "station.hpp"
 #include <iostream>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 #include <chrono>
+#include <thread>
+#include <vector>
+#include <cstdlib>
+#include <ctime>
+#include "utils.hpp"
+#include "csma.hpp"
 
 using namespace std;
 
-Station::Station(int id, Channel& channel, CSMAScheme scheme, int frames_to_send, double p_prob)
-    : id(id), channel(channel), scheme(scheme), frames_to_send(frames_to_send), p_probability(p_prob) {
-    rng.seed(std::chrono::system_clock::now().time_since_epoch().count() + id);
-}
-
-void Station::backoff(int attempt) {
-    // Binary exponential backoff
-    int max_slots = (1 << std::min(attempt, 10)) - 1;
-    std::uniform_int_distribution<int> dist(0, max_slots);
-    int wait_slots = dist(rng);
+int main() {
+    srand(time(0) ^ getpid()); // Random seed unique per process
     
-    // Simulate slot time (e.g., 2ms)
-    std::this_thread::sleep_for(std::chrono::milliseconds(wait_slots * 2));
-}
+    int station_id;
+    int protocol;
+    int frames_to_send = 5;
+    double p = 0.5;
 
-void Station::carrier_sense() {
-    std::uniform_real_distribution<double> prob_dist(0.0, 1.0);
-    std::uniform_int_distribution<int> random_wait(5, 15);
+    cout << "Enter Station ID (e.g. 1, 2, 3...): ";
+    cin >> station_id;
     
-    while (true) {
-        if (channel.is_idle()) {
-            if (scheme == CSMAScheme::NON_PERSISTENT || scheme == CSMAScheme::ONE_PERSISTENT || scheme == CSMAScheme::CSMA_CD) {
-                break; // Transmit immediately
-            } else if (scheme == CSMAScheme::P_PERSISTENT) {
-                if (prob_dist(rng) <= p_probability) {
-                    break; // Transmit with probability p
-                } else {
-                    // Wait one time slot and check again
-                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
-                }
-            }
-        } else {
-            // Channel is BUSY
-            if (scheme == CSMAScheme::NON_PERSISTENT) {
-                // Wait a random amount of time before sensing again
-                std::this_thread::sleep_for(std::chrono::milliseconds(random_wait(rng)));
-            } else {
-                // 1-persistent, p-persistent, CSMA/CD continuously sense
-                // Yield thread to avoid 100% CPU usage on spinlock
-                std::this_thread::yield();
-            }
-        }
+    cout << "Select CSMA Protocol:\n1. 1-Persistent\n2. Non-Persistent\n3. p-Persistent\nChoice: ";
+    cin >> protocol;
+    
+    if (protocol == 3) {
+        cout << "Enter Probability 'p' (0.0 - 1.0): ";
+        cin >> p;
     }
-}
 
-bool Station::transmit_frame() {
-    channel.start_transmission();
-    bool success = true;
-    
-    // Simulate transmission time (e.g., 10ms)
-    // CSMA/CD actively detects collision during transmission
-    for (int i = 0; i < 10; ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        if (scheme == CSMAScheme::CSMA_CD && channel.get_state() == ChannelState::COLLISION) {
-            success = false;
-            break; // Abort transmission early
-        }
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    struct sockaddr_in server_addr;
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(8080);
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+
+    if (protocol == 1) {
+        run_1_persistent(sock, server_addr, station_id, frames_to_send);
+    } else if (protocol == 2) {
+        run_non_persistent(sock, server_addr, station_id, frames_to_send);
+    } else if (protocol == 3) {
+        run_p_persistent(sock, server_addr, station_id, frames_to_send, p);
     }
     
-    // If not CSMA/CD, we only realize collision after full transmission time
-    if (scheme != CSMAScheme::CSMA_CD && channel.get_state() == ChannelState::COLLISION) {
-        success = false;
-    }
-    
-    channel.end_transmission();
-    return success;
-}
-
-void Station::run() {
-    int frames_sent = 0;
-    while (frames_sent < frames_to_send) {
-        auto start_time = std::chrono::steady_clock::now();
-        int attempts = 0;
-        bool transmitted = false;
-        
-        while (!transmitted && attempts < 15) { // Max 15 attempts per frame
-            carrier_sense();
-            
-            if (transmit_frame()) {
-                transmitted = true;
-                frames_sent++;
-                stats.total_frames_sent++;
-            } else {
-                stats.total_collisions++;
-                attempts++;
-                
-                if (scheme == CSMAScheme::CSMA_CD) {
-                    // Send Jam signal
-                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
-                }
-                
-                backoff(attempts);
-            }
-        }
-        
-        auto end_time = std::chrono::steady_clock::now();
-        stats.total_delay_ms += std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-    }
-}
-
-StationStats Station::get_stats() const {
-    return stats;
+    cout << "\n[Station " << station_id << "] Finished transmitting all frames.\n";
+    close(sock);
+    return 0;
 }
